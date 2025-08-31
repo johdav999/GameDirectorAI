@@ -3,7 +3,7 @@
 #include <random>
 #include <atomic>
 
-enum ggml_log_level : int;
+#include "llama.h"
 
 struct FLlamaParams {
     FString ModelPath;
@@ -14,6 +14,7 @@ struct FLlamaParams {
     bool    bPreferGPU = true;
     int32   NGpuLayers = 100;
     int32   GPUBatchSize = 512;
+    FString GrammarFilePath;
 };
 
 class FLlamaRunner
@@ -37,4 +38,21 @@ public:
     void Shutdown();
     void Cancel();
 
+    void Generate(
+        const FString& Prompt,
+        TFunction<void(const FString&)> OnToken,
+        TFunction<void(const FString&)> OnComplete,
+        TFunction<void(const FString&)> OnError);
+
+private:
+    bool BuildSamplerChainIfNeeded(const FString& GrammarFilePath);
+
+    FLlamaParams P;
+    llama_model* Model = nullptr;
+    llama_context* Ctx = nullptr;
+    llama_sampler* Sampler = nullptr;
+
+    FCriticalSection GenLock;
+    std::atomic<bool> bShuttingDown{false};
+    std::atomic<bool> bCancel{false};
 };

@@ -23,13 +23,14 @@ public class GameDirectorPlugin : ModuleRules
 			);
 			
 		
-		PublicDependencyModuleNames.AddRange(
-			new string[]
-			{
-				"Core"
-				// ... add other public dependencies that you statically link with here ...
-			}
-			);
+                PublicDependencyModuleNames.AddRange(
+                        new string[]
+                        {
+                                "Core",
+                                "llama"
+                                // ... add other public dependencies that you statically link with here ...
+                        }
+                        );
 			
 		
 		PrivateDependencyModuleNames.AddRange(
@@ -37,8 +38,15 @@ public class GameDirectorPlugin : ModuleRules
 			{
 				"CoreUObject",
 				"Engine",
-				"Slate",
-				"SlateCore","llama","Json","JsonUtilities","UMG","InputCore","EnhancedInput","Projects","DeveloperSettings"
+                                "Slate",
+                                "SlateCore",
+                                "Json",
+                                "JsonUtilities",
+                                "UMG",
+                                "InputCore",
+                                "EnhancedInput",
+                                "Projects",
+                                "DeveloperSettings"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);

@@ -45,6 +45,7 @@ static inline bool CompatIsEOS(llama_model* Model, llama_token tok)
 FLlamaRunner::FLlamaRunner()
     : Model(nullptr)
     , Ctx(nullptr)
+    , Sampler(nullptr)
 {
 }
 
@@ -57,7 +58,7 @@ bool FLlamaRunner::Init(const FLlamaParams& Params)
 {
     P = Params;
 
-    llama_backend_init();
+      llama_backend_init();
 
     std::string ModelPathStr = TCHAR_TO_UTF8(*P.ModelPath);
 
@@ -76,7 +77,7 @@ bool FLlamaRunner::Init(const FLlamaParams& Params)
     ModelParams.n_gpu_layers = 0;
 #endif
 
-    Model = llama_load_model_from_file(ModelPathStr.c_str(), ModelParams);
+      Model = llama_load_model_from_file(ModelPathStr.c_str(), ModelParams);
     if (!Model)
     {
         return false;
@@ -86,7 +87,7 @@ bool FLlamaRunner::Init(const FLlamaParams& Params)
     CtxParams.n_ctx = P.ContextLength;
     CtxParams.n_threads = P.NumThreads;
 
-    Ctx = llama_new_context_with_model(Model, CtxParams);
+      Ctx = llama_new_context_with_model(Model, CtxParams);
 
     return Ctx != nullptr;
 }
@@ -107,12 +108,40 @@ void FLlamaRunner::Shutdown()
         llama_free_model(Model);
         Model = nullptr;
     }
-    llama_backend_free();
+      if (Sampler)
+      {
+          llama_sampler_free(Sampler);
+          Sampler = nullptr;
+      }
+
+      llama_backend_free();
 }
 
 void FLlamaRunner::Cancel()
 {
     bCancel.store(true);
+}
+
+bool FLlamaRunner::BuildSamplerChainIfNeeded(const FString& GrammarFilePath)
+{
+    if (Sampler)
+    {
+        return true;
+    }
+
+    llama_sampler_chain_params params = llama_sampler_chain_default_params();
+    Sampler = llama_sampler_chain_init(params);
+    if (!Sampler)
+    {
+        return false;
+    }
+
+    llama_sampler_chain_add(Sampler, llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(Sampler, llama_sampler_init_top_p(0.9f, 1));
+    llama_sampler_chain_add(Sampler, llama_sampler_init_temp(P.Temperature));
+
+    // Grammar support can be added here using GrammarFilePath if needed
+    return true;
 }
 void FLlamaRunner::Generate(
     const FString& Prompt,

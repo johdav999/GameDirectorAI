@@ -14,11 +14,17 @@
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,
-	"Modules": [
-		{
-			"Name": "GameDirectorPlugin",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		}
-	]
+        "Modules": [
+                {
+                        "Name": "GameDirectorPlugin",
+                        "Type": "Runtime",
+                        "LoadingPhase": "Default"
+                }
+        ],
+        "Plugins": [
+                {
+                        "Name": "EnhancedInput",
+                        "Enabled": true
+                }
+        ]
 }
