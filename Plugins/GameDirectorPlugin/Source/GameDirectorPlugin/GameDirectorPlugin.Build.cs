@@ -38,7 +38,7 @@ public class GameDirectorPlugin : ModuleRules
 				"CoreUObject",
 				"Engine",
 				"Slate",
-				"SlateCore","llama","Json","JsonUtilities","UMG","InputCore","EnhancedInput"
+				"SlateCore","llama","Json","JsonUtilities","UMG","InputCore","EnhancedInput","GameDirectorAI"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);
