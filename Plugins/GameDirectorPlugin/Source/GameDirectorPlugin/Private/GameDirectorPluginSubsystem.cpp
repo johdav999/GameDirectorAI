@@ -2,33 +2,54 @@
 
 #include "GameDirectorPluginSubsystem.h"
 #include "Misc/Paths.h"
+
+#include "llama.h"
+
 #include "LlamaRunner.h"
 
-void UGameDirectorPluginSubsystem::InitiateLlamaRunner()
+
+bool UGameDirectorPluginSubsystem::InitiateLlamaRunner()
 {
+
+    if (Runner.IsValid())
     // Ensure the Llama backend is initialised before attempting to launch any runner process
     ULlamaRunner::InitiateLlama();
 
     if (LlamaRunnerHandle.IsValid())
+
     {
-        return;
+        return true;
     }
 
-    const FString RunnerPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Binaries/Win64/llama-runner.exe")));
-    LlamaRunnerHandle = FPlatformProcess::CreateProc(*RunnerPath, nullptr, true, false, false, nullptr, 0, nullptr, nullptr);
+    Runner = MakeUnique<FLlamaRunner>();
 
-    if (!LlamaRunnerHandle.IsValid())
+    FLlamaParams P;
+
+    // Model + runtime settings
+    P.ModelPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("Models"), TEXT("model.gguf")));
+    P.ContextLength = 2048;      // best for RTX 2060
+    P.MaxTokens = 512;           // cap per call, bump if needed
+    P.Temperature = 0.8f;
+    P.NumThreads = 0;            // auto-detect threads
+    P.bPreferGPU = true;
+    P.NGpuLayers = 12;           // sweet spot from CLI tests
+    P.GPUBatchSize = 2048;       // prompt ingestion speed
+
+    if (!Runner->Init(P))
     {
-        UE_LOG(LogTemp, Warning, TEXT("Failed to start Llama runner process at %s"), *RunnerPath);
+        Runner.Reset();
+        UE_LOG(LogTemp, Error, TEXT("Failed to load model"));
+        return false;
     }
+
+    return true;
 }
 
 void UGameDirectorPluginSubsystem::Deinitialize()
 {
-    if (LlamaRunnerHandle.IsValid())
+    if (Runner.IsValid())
     {
-        FPlatformProcess::TerminateProc(LlamaRunnerHandle, true);
-        LlamaRunnerHandle.Reset();
+        Runner.Reset();
     }
 }
 

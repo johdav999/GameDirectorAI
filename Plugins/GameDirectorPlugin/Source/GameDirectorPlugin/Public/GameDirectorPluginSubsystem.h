@@ -3,9 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "HAL/PlatformProcess.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "GameDirectorPluginSubsystem.generated.h"
+
+// Forward declarations for Llama runner support
+struct FLlamaParams;
+class FLlamaRunner;
 
 UCLASS()
 class GAMEDIRECTORPLUGIN_API UGameDirectorPluginSubsystem : public UGameInstanceSubsystem
@@ -14,11 +17,12 @@ class GAMEDIRECTORPLUGIN_API UGameDirectorPluginSubsystem : public UGameInstance
 
 public:
     UFUNCTION(BlueprintCallable, Category="GameDirector")
-    void InitiateLlamaRunner();
+    bool InitiateLlamaRunner();
 
     virtual void Deinitialize() override;
 
 private:
-    FProcHandle LlamaRunnerHandle;
+    // In-process Llama runner instance
+    TUniquePtr<FLlamaRunner> Runner;
 };
 
