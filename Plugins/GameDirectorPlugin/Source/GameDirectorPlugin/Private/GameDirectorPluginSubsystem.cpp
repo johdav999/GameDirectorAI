@@ -2,11 +2,21 @@
 
 #include "GameDirectorPluginSubsystem.h"
 #include "Misc/Paths.h"
+
 #include "llama.h"
+
+#include "LlamaRunner.h"
+
 
 bool UGameDirectorPluginSubsystem::InitiateLlamaRunner()
 {
+
     if (Runner.IsValid())
+    // Ensure the Llama backend is initialised before attempting to launch any runner process
+    ULlamaRunner::InitiateLlama();
+
+    if (LlamaRunnerHandle.IsValid())
+
     {
         return true;
     }
