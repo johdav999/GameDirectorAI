@@ -28,11 +28,11 @@ public:
     // NEW: overload to match old call-site (3 args)
     bool Init(const FString& ModelPath, int32 ContextLen, int32 NumThreads)
     {
-        FLlamaParams P;
-        P.ModelPath = ModelPath;
-        P.ContextLength = ContextLen;
-        P.NumThreads = NumThreads;
-        return Init(P);
+        FLlamaParams P1;
+        P1.ModelPath = ModelPath;
+        P1.ContextLength = ContextLen;
+        P1.NumThreads = NumThreads;
+        return Init(P1);
     }
 
     void Shutdown();
