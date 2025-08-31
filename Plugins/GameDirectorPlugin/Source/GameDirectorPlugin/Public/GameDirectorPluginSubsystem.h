@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "llama.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "GameDirectorPluginSubsystem.generated.h"
 

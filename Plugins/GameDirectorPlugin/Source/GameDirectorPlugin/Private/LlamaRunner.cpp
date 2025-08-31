@@ -3,6 +3,44 @@
 #include <vector>
 #include <string>
 
+
+#ifndef LLAMA_API_VERSION
+#define LLAMA_API_VERSION 0
+#endif
+
+// ---- COMPAT HELPERS (do NOT expose llama_vocab outside) ----
+
+static inline int32_t CompatTokenize(
+    llama_model* Model, const std::string& text,
+    std::vector<llama_token>& out,
+    bool add_special = true, bool parse_special = false)
+{
+    // Old, stable path: use vocab-based API internally
+    const llama_vocab* v = llama_model_get_vocab(Model);
+    return llama_tokenize(
+        v,
+        text.c_str(),
+        (int32_t)text.size(),
+        out.data(),
+        (int32_t)out.size(),
+        add_special,
+        parse_special);
+}
+
+static inline int32_t CompatTokenToPiece(
+    llama_model* Model, llama_token tok, char* out, int32_t cap,
+    bool lstrip = false, bool special = false)
+{
+    const llama_vocab* v = llama_model_get_vocab(Model);
+    return llama_token_to_piece(v, tok, out, cap, lstrip, special);
+}
+
+static inline bool CompatIsEOS(llama_model* Model, llama_token tok)
+{
+    const llama_vocab* v = llama_model_get_vocab(Model);
+    return tok == llama_vocab_eos(v);
+}
+
 FLlamaRunner::FLlamaRunner()
     : Model(nullptr)
     , Context(nullptr)
@@ -25,6 +63,7 @@ FLlamaRunner::~FLlamaRunner()
 
 bool FLlamaRunner::Init(const FString& ModelPath, int32 ContextLength, int32 NumThreads)
 {
+
     llama_backend_init();
 
     std::string ModelPathStr = TCHAR_TO_UTF8(*ModelPath);
@@ -46,58 +85,165 @@ bool FLlamaRunner::Init(const FString& ModelPath, int32 ContextLength, int32 Num
     CtxParams.n_threads = NumThreads;
 
     Context = llama_new_context_with_model(Model, CtxParams);
-    NPast = 0;
+    //NPast = 0;
 
     return Context != nullptr;
 }
-
-FString FLlamaRunner::Generate(const FString& Prompt, int32 MaxTokens, float Temperature, TFunctionRef<void(const FString&)> OnToken)
+void FLlamaRunner::Generate(
+    const FString& Prompt,
+    TFunction<void(const FString&)> OnToken,
+    TFunction<void(const FString&)> OnComplete,
+    TFunction<void(const FString&)> OnError)
 {
-    if (!Context)
+    // quick guard
     {
-        return FString();
+        FScopeLock _(&GenLock);
+        if (bShuttingDown.load(std::memory_order_relaxed)) return;
+        bCancel.store(false);
     }
 
-    std::string PromptStr = TCHAR_TO_UTF8(*Prompt);
-    std::vector<llama_token> PromptTokens = llama_tokenize(Model, PromptStr, true);
+    const FString PromptCopy = Prompt;
 
-    llama_batch Batch = llama_batch_init(PromptTokens.size(), 0, 1);
-    for (size_t i = 0; i < PromptTokens.size(); ++i)
-    {
-        llama_batch_add(&Batch, PromptTokens[i], NPast + i, {0}, false);
-    }
-    llama_decode(Context, Batch);
-    NPast += PromptTokens.size();
-
-    llama_sampler_chain_params SamplerParams = llama_sampler_chain_default_params();
-    llama_sampler* Sampler = llama_sampler_chain_init(SamplerParams);
-    llama_sampler_chain_add(Sampler, llama_sampler_init_top_k(40));
-    llama_sampler_chain_add(Sampler, llama_sampler_init_top_p(0.9f, 1));
-    llama_sampler_chain_add(Sampler, llama_sampler_init_temp(Temperature));
-    llama_sampler_chain_add(Sampler, llama_sampler_init_greedy());
-
-    FString Result;
-    for (int32 i = 0; i < MaxTokens; ++i)
-    {
-        const llama_token Token = llama_sampler_sample(Sampler, Context, -1);
-        llama_sampler_accept(Sampler, Token);
-
-        llama_batch TokenBatch = llama_batch_init(1, 0, 1);
-        llama_batch_add(&TokenBatch, Token, NPast, {0}, true);
-        llama_decode(Context, TokenBatch);
-        NPast += 1;
-
-        const char* Piece = llama_token_to_piece(Model, Token);
-        FString TokenStr = UTF8_TO_TCHAR(Piece);
-        OnToken(TokenStr);
-        Result += TokenStr;
-        if (Token == llama_token_eos(Model))
+    Async(EAsyncExecution::ThreadPool, [this, PromptCopy, OnToken, OnComplete, OnError]()
         {
-            break;
-        }
-    }
+            auto SendTokenGT = [OnToken](const FString& Tok)
+                {
+                    if (!OnToken) return;
+                    AsyncTask(ENamedThreads::GameThread, [Tok, OnToken] { OnToken(Tok); });
+                };
+            auto SendCompleteGT = [OnComplete](const FString& Out)
+                {
+                    if (!OnComplete) return;
+                    AsyncTask(ENamedThreads::GameThread, [Out, OnComplete] { OnComplete(Out); });
+                };
+            auto SendErrorGT = [OnError](const FString& Err)
+                {
+                    if (!OnError) return;
+                    AsyncTask(ENamedThreads::GameThread, [Err, OnError] { OnError(Err); });
+                };
 
-    llama_sampler_free(Sampler);
-    return Result;
+            // single-flight
+            FScopeLock _(&GenLock);
+
+            if (!Model || !Ctx) { SendErrorGT(TEXT("Model not initialized.")); return; }
+            if (!BuildSamplerChainIfNeeded(P.GrammarFilePath)) { SendErrorGT(TEXT("Failed to init sampler chain.")); return; }
+            ensureAlwaysMsgf(Sampler != nullptr, TEXT("Sampler null"));
+
+            llama_model* M = Model;
+            llama_context* C = Ctx;
+
+            // --- Tokenize (no direct vocab) ---
+            std::string PStr = TCHAR_TO_UTF8(*PromptCopy);
+            std::vector<llama_token> tokens(std::max<size_t>(PStr.size() + 8, 32));
+
+            int32_t n_tokens = CompatTokenize(M, PStr, tokens, /*add_special=*/true, /*parse_special=*/false);
+            if (n_tokens < 0) {
+                tokens.resize((size_t)(-n_tokens));
+                n_tokens = CompatTokenize(M, PStr, tokens, /*add_special=*/true, /*parse_special=*/false);
+            }
+            if (n_tokens <= 0) { SendErrorGT(TEXT("Tokenization failed.")); return; }
+            tokens.resize(n_tokens);
+
+            // --- Prompt eval (no llama_batch_add) ---
+            auto make_batch = [](int32_t cap) { return llama_batch_init(cap, /*embd=*/0, /*n_seq_max=*/1); };
+            llama_batch promptBatch = make_batch((int32)tokens.size());
+
+            for (int32 i = 0; i < (int32)tokens.size(); ++i) {
+                promptBatch.token[i] = tokens[i];
+                promptBatch.pos[i] = i;
+                promptBatch.n_seq_id[i] = 1;
+                promptBatch.seq_id[i][0] = 0;
+                promptBatch.logits[i] = (i == (int32)tokens.size() - 1);
+            }
+            promptBatch.n_tokens = (int32)tokens.size();
+
+            if (llama_decode(C, promptBatch) != 0) {
+                llama_batch_free(promptBatch);
+                SendErrorGT(TEXT("Decode failed (prompt)."));
+                return;
+            }
+            llama_batch_free(promptBatch);
+
+            // --- Generation ---
+            llama_sampler_reset(Sampler);
+
+            TArray<llama_token> OutTokens;
+            OutTokens.Reserve(P.MaxTokens);
+
+            FString Out;
+            int32 n_past = (int32)tokens.size();
+
+            llama_batch step = llama_batch_init(1, 0, 1); // reuse
+            TArray<llama_token> StreamBuf;
+            StreamBuf.Reserve(32);
+
+            for (int i = 0; i < P.MaxTokens && !bCancel.load(); ++i)
+            {
+                llama_token next_id = llama_sampler_sample(Sampler, C, /*idx_seq=*/0);
+                llama_sampler_accept(Sampler, next_id);
+
+                if (CompatIsEOS(M, next_id)) break;
+
+                OutTokens.Add(next_id);
+                StreamBuf.Add(next_id);
+
+                // feed back
+                step.token[0] = next_id;
+                step.pos[0] = n_past;
+                step.n_seq_id[0] = 1;
+                step.seq_id[0][0] = 0;
+                step.logits[0] = 1;
+                step.n_tokens = 1;
+
+                if (llama_decode(C, step) != 0) {
+                    SendErrorGT(TEXT("Decode failed (loop)."));
+                    break;
+                }
+                ++n_past;
+
+                // stream every ~8 tokens
+                if (StreamBuf.Num() >= 8) {
+                    std::string chunk;
+                    chunk.reserve(StreamBuf.Num() * 8);
+                    for (llama_token t : StreamBuf) {
+                        char buf[2048];
+                        int32_t n = CompatTokenToPiece(M, t, buf, (int32)sizeof(buf),
+                            /*lstrip=*/false, /*special=*/false);
+                        if (n < 0) n = 0;
+                        if (n >= (int32)sizeof(buf)) n = (int32)sizeof(buf) - 1;
+                        buf[n] = '\0';
+                        chunk.append(buf, (size_t)n);
+                    }
+                    const FString FChunk = UTF8_TO_TCHAR(chunk.c_str());
+                    Out += FChunk;
+                    SendTokenGT(FChunk);
+                    StreamBuf.Reset();
+                }
+            }
+
+            // flush remainder
+            if (StreamBuf.Num() > 0) {
+                std::string chunk;
+                chunk.reserve(StreamBuf.Num() * 8);
+                for (llama_token t : StreamBuf) {
+                    char buf[2048];
+                    int32_t n = CompatTokenToPiece(M, t, buf, (int32)sizeof(buf),
+                        /*lstrip=*/false, /*special=*/false);
+                    if (n < 0) n = 0;
+                    if (n >= (int32)sizeof(buf)) n = (int32)sizeof(buf) - 1;
+                    buf[n] = '\0';
+                    chunk.append(buf, (size_t)n);
+                }
+                const FString FChunk = UTF8_TO_TCHAR(chunk.c_str());
+                Out += FChunk;
+                SendTokenGT(FChunk);
+            }
+
+            llama_batch_free(step);
+            llama_perf_context_print(C);
+
+            if (bCancel.load()) SendErrorGT(TEXT("Cancelled"));
+            else                SendCompleteGT(Out.TrimStartAndEnd());
+        });
 }
 
