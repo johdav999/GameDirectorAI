@@ -1,14 +1,22 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
-#include "GameDirectorSettings.generated.h"
+#include "GameDirectorDeveloperSettings.generated.h"
 
+/**
+ * 
+ */
 UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Game Director AI"))
-class GAMEDIRECTORAI_API UGameDirectorSettings : public UDeveloperSettings
+class GAMEDIRECTORPLUGIN_API UGameDirectorDeveloperSettings : public UDeveloperSettings
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 public:
+    // (Optional) move from “Plugins” to “Game” in Project Settings:
+    // virtual FName GetCategoryName() const override { return TEXT("Game"); }
+
     UPROPERTY(config, EditAnywhere, Category = "Model")
     FFilePath GGUFModelPath;
 
@@ -24,4 +32,3 @@ public:
     UPROPERTY(config, EditAnywhere, Category = "Performance", meta = (ClampMin = "0", UIMin = "0"))
     int32 NumThreads = 0;
 };
-

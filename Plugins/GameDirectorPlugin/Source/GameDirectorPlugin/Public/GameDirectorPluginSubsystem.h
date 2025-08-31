@@ -12,12 +12,6 @@ class GAMEDIRECTORPLUGIN_API UGameDirectorPluginSubsystem : public UGameInstance
 {
     GENERATED_BODY()
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
-    UFUNCTION(BlueprintCallable, Category = "Game Director")
-    FString GenerateFromPrompt(const FString& Prompt);
-
-private:
-    TUniquePtr<FLlamaRunner> Runner;
 };
 
