@@ -12,3 +12,16 @@ Saved
 *.suo
 *.xcodeproj
 *.xcworkspace
+
+
+# --- Third-party binaries (ignore) ---
+Plugins/**/Source/ThirdParty/**/bin/**
+Plugins/**/Source/ThirdParty/**/lib/**
+Source/ThirdParty/**/bin/**
+Source/ThirdParty/**/lib/**
+
+# Keep headers & placeholders
+!Plugins/**/Source/ThirdParty/**/include/**
+!Source/ThirdParty/**/include/**
+!Plugins/**/Source/ThirdParty/**/bin/README.md
+!Plugins/**/Source/ThirdParty/**/lib/README.md

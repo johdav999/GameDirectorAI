@@ -1,5 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
+using System.IO;
 using UnrealBuildTool;
 
 public class GameDirectorPlugin : ModuleRules
@@ -25,7 +26,7 @@ public class GameDirectorPlugin : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"Core",
+				"Core"
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
@@ -37,17 +38,28 @@ public class GameDirectorPlugin : ModuleRules
 				"CoreUObject",
 				"Engine",
 				"Slate",
-				"SlateCore",
+				"SlateCore","llama","Json","JsonUtilities","UMG","InputCore","EnhancedInput"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);
-		
-		
-		DynamicallyLoadedModuleNames.AddRange(
+
+        //string TP = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "ThirdParty", "llama"));
+        //PublicIncludePaths.Add(Path.Combine(TP, "include"));
+
+        //if (Target.Platform == UnrealTargetPlatform.Win64)
+        //{
+        //    string lib = Path.Combine(TP, "Win64", "lib", "llama.lib");
+        //    string bin = Path.Combine(TP, "Win64", "bin", "llama.dll");
+
+        //    PublicAdditionalLibraries.Add(lib);
+        //    RuntimeDependencies.Add(Path.Combine("$(TargetOutputDir)", "llama.dll"), bin);
+        //}
+        DynamicallyLoadedModuleNames.AddRange(
 			new string[]
 			{
 				// ... add any modules that your module loads dynamically here ...
 			}
 			);
+
 	}
 }
