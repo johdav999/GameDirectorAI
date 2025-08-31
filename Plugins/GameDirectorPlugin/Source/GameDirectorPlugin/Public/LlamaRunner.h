@@ -3,6 +3,8 @@
 #include <random>
 #include <atomic>
 
+enum ggml_log_level : int;
+
 struct FLlamaParams {
     FString ModelPath;
     int32   ContextLength = 4096;
@@ -17,6 +19,9 @@ struct FLlamaParams {
 class FLlamaRunner
 {
 public:
+    FLlamaRunner();
+    ~FLlamaRunner();
+
     bool Init(const FLlamaParams& Params);
 
     // NEW: overload to match old call-site (3 args)

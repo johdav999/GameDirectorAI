@@ -1,4 +1,5 @@
 #include "LlamaRunner.h"
+#include "llama.h"
 #include "ggml-cuda.h"
 #include <vector>
 #include <string>
@@ -43,37 +44,38 @@ static inline bool CompatIsEOS(llama_model* Model, llama_token tok)
 
 FLlamaRunner::FLlamaRunner()
     : Model(nullptr)
-    , Context(nullptr)
-    , NPast(0)
+    , Ctx(nullptr)
 {
 }
 
 FLlamaRunner::~FLlamaRunner()
 {
-    if (Context)
-    {
-        llama_free(Context);
-    }
-    if (Model)
-    {
-        llama_free_model(Model);
-    }
-    llama_backend_free();
+    Shutdown();
 }
 
-bool FLlamaRunner::Init(const FString& ModelPath, int32 ContextLength, int32 NumThreads)
+bool FLlamaRunner::Init(const FLlamaParams& Params)
 {
+    P = Params;
 
     llama_backend_init();
 
-    std::string ModelPathStr = TCHAR_TO_UTF8(*ModelPath);
+    std::string ModelPathStr = TCHAR_TO_UTF8(*P.ModelPath);
 
     llama_model_params ModelParams = llama_model_default_params();
 #ifdef GGML_USE_CUDA
-    ModelParams.n_gpu_layers = ggml_backend_cuda_get_device_count() > 0 ? 99 : 0;
+    if (P.bPreferGPU && ggml_backend_cuda_get_device_count() > 0)
+    {
+        ModelParams.n_gpu_layers = P.NGpuLayers;
+        ModelParams.n_batch = P.GPUBatchSize;
+    }
+    else
+    {
+        ModelParams.n_gpu_layers = 0;
+    }
 #else
     ModelParams.n_gpu_layers = 0;
 #endif
+
     Model = llama_load_model_from_file(ModelPathStr.c_str(), ModelParams);
     if (!Model)
     {
@@ -81,13 +83,36 @@ bool FLlamaRunner::Init(const FString& ModelPath, int32 ContextLength, int32 Num
     }
 
     llama_context_params CtxParams = llama_context_default_params();
-    CtxParams.n_ctx = ContextLength;
-    CtxParams.n_threads = NumThreads;
+    CtxParams.n_ctx = P.ContextLength;
+    CtxParams.n_threads = P.NumThreads;
 
-    Context = llama_new_context_with_model(Model, CtxParams);
-    //NPast = 0;
+    Ctx = llama_new_context_with_model(Model, CtxParams);
 
-    return Context != nullptr;
+    return Ctx != nullptr;
+}
+
+void FLlamaRunner::Shutdown()
+{
+    FScopeLock _(&GenLock);
+    bShuttingDown.store(true);
+    bCancel.store(true);
+
+    if (Ctx)
+    {
+        llama_free(Ctx);
+        Ctx = nullptr;
+    }
+    if (Model)
+    {
+        llama_free_model(Model);
+        Model = nullptr;
+    }
+    llama_backend_free();
+}
+
+void FLlamaRunner::Cancel()
+{
+    bCancel.store(true);
 }
 void FLlamaRunner::Generate(
     const FString& Prompt,
