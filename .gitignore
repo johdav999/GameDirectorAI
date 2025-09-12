@@ -1,0 +1,33 @@
+# Unreal default build dirs
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.vscode/
+
+# Plugins (anywhere)
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# Third-party binary/lib folders (all platforms)
+Plugins/**/ThirdParty/**/bin/
+Plugins/**/ThirdParty/**/lib/
+Plugins/**/ThirdParty/**/win64/bin/
+Plugins/**/ThirdParty/**/win64/lib/
+Plugins/**/ThirdParty/**/Win64/bin/
+Plugins/**/ThirdParty/**/Win64/lib/
+
+# Unreal build outputs of plugins
+Plugins/**/Binaries/Win64/
+Plugins/**/Binaries/Linux/
+Plugins/**/Binaries/Mac/
+
+# Build artifacts anywhere
+**/*.dll
+**/*.lib
+**/*.exp
+**/*.pdb
+**/*.ilk
+**/*.exe
+**/*.pak
