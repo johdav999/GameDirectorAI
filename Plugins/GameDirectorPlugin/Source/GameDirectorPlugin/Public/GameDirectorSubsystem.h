@@ -97,7 +97,7 @@ public:
 	bool InitializeRunner();
 
     UFUNCTION(BlueprintCallable, Category = "GameDirector")
-    bool Generate2(FString Prompt);
+    bool Generate2(FString Prompt,FString Intent);
 
 
     UFUNCTION(BlueprintCallable, Category = "GameDirector")

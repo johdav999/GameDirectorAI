@@ -5,6 +5,7 @@ Intermediate/
 Saved/
 .vs/
 .vscode/
+*.gguf
 
 # Plugins (anywhere)
 Plugins/**/Binaries/

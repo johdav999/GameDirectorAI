@@ -14,7 +14,9 @@
 // If you prefer to include "llama.h" here, do it now:
 #include "llama.h" // ok to include privately
 
+DECLARE_LOG_CATEGORY_EXTERN(LogGameAI, Log, All);
 
+DEFINE_LOG_CATEGORY(LogGameAI);
 
 static bool ExtractStrictJSONObject(const FString& In, FString& Out, FString* OutErr = nullptr)
 {
@@ -401,7 +403,7 @@ uint32 LLamaRunnerAsync::FWorker::Run()
                 const float temp = 0.20f;
 
                 // Call synchronous generation on the worker thread
-                Output = Owner->GenerateJSON(Job.Prompt, /*max_new*/800, /*top_k*/20, /*top_p*/0.8f, /*temp*/0.20f);
+                Output = Owner->GenerateJSON(Job.Prompt, /*max_new*/800, /*top_k*/20, /*top_p*/0.8f, /*temp*/0.20f,Job.Intent);
             }
 
             if (Job.OnDone)
@@ -552,7 +554,7 @@ void LLamaRunnerAsync::Shutdown()
 }
 
 // ---------- Async enqueue ----------
-void LLamaRunnerAsync::GenerateJSONAsync(const FString& Prompt, TFunction<void(FString)> OnDone)
+void LLamaRunnerAsync::GenerateJSONAsync(const FString& Prompt, TFunction<void(FString)> OnDone,FString Intent)
 {
     if (!IsInitialized() || !Worker)
     {
@@ -565,11 +567,12 @@ void LLamaRunnerAsync::GenerateJSONAsync(const FString& Prompt, TFunction<void(F
     FJob Job;
     Job.Prompt = Prompt;
     Job.OnDone = MoveTemp(OnDone);
+    Job.Intent = Intent;
     Worker->Enqueue(MoveTemp(Job));
 }
 
 // ---------- Synchronous GenerateJSON (PUT YOUR EXISTING BODY HERE) ----------
-FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int top_k, float top_p, float temp)
+FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int top_k, float top_p, float temp,FString Intent)
 {
 
     // Add near the top of GenerateJSON, after you include Json headers and have IsValidDirectorJSON available.
@@ -612,12 +615,12 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
 
                         if (IsValidDirectorJSON(Candidate, /*out*/Clean, /*out*/Err))
                         {
-                            UE_LOG(LogTemp, Display, TEXT("Exit (valid JSON): %s"), *Clean);
+                            UE_LOG(LogGameAI, Display, TEXT("Exit (valid JSON): %s"), *Clean);
                             return EJsonProbe::ClosedValid;
                         }
                         else
                         {
-                            UE_LOG(LogTemp, Warning, TEXT("Balanced but invalid JSON, continuing. Error: %s\nCandidate:\n%s"),
+                            UE_LOG(LogGameAI, Display, TEXT("Balanced but invalid JSON, continuing. Error: %s\nCandidate:\n%s"),
                                 *Err, *Candidate);
                             return EJsonProbe::ClosedInvalid; // keep generating
                         }
@@ -630,31 +633,47 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
 
 
     if (!Ctx || !Vocab || !Model) {
-        UE_LOG(LogTemp, Error, TEXT("LlamaRunner not initialized"));
+        UE_LOG(LogGameAI, Display, TEXT("LlamaRunner not initialized"));
         return "{}";
     }
 
     // 0) Nudge model toward JSON-only
-    UE_LOG(LogTemp, Error, TEXT("0) Nudge model toward JSON-only"));
-    static const char* kSystemJSONTrigger2 = R"(You are a game director planner. OUTPUT RULES: - STRICT JSON only; output must start with '{' and end with '}'. - Use exactly these keys: {"intent":"<offer_quest|warn|give_clue|continue|escalate|deescalate>","reason":"<short>","tool_calls":[{"name":"<QuestPatch|SpawnEncounter|SetFlag|GiveItem|WeatherControl|ForeshadowEvent|TensionMeterAdjust>","args":{}}],"dialogue":{"speaker":"<NPC name like GuardCaptain>","emote":"<urgent|wary|calm>","lines":["<short line>"]},"quest_patch":{"questId":"<string id>","addObjectives":[{"id":"<string>","desc":"<short>"}]}} - If a section is not needed, use [] or {}. Do NOT invent keys (e.g., {"empty":true}). No ellipses or "..." lines. POLICY: - When weather cues are present (e.g., “clouds gathering”) or the player approaches an ACTIVE objective, include exactly ONE tool_call: Prefer WeatherControl("overcast") for light clouds; otherwise ONE of ForeshadowEvent or TensionMeterAdjust(+1). - Only use zero tool_calls if truly nothing is warranted; explain why in "reason". FEW-SHOT: INPUT: Player leaves CitySquare heading west; time=late afternoon; clouds gathering lightly; objective=guard_ruins (active). OUTPUT: BEGIN_JSON {"intent":"warn","reason":"Approaching active ruins as weather worsens.","tool_calls":[{"name":"WeatherControl","args":{"preset":"overcast"}}],"dialogue":{"speaker":"Villager","emote":"wary","lines":["Storm’s building by the ruins. Watch yourself."]},"quest_patch":{}} END_JSON)";
+    UE_LOG(LogGameAI, Display, TEXT("0) Nudge model toward JSON-only"));
+    static const char* kSystemJSONTrigger2 = R"(You are a game director planner. OUTPUT RULES: - STRICT JSON only; output must start with '{' and end with '}'. - Use exactly these keys: {"intent":"<intent_value>","reason":"<short>","tool_calls":[{"name":"<QuestPatch|SpawnEncounter|SetFlag|GiveItem|WeatherControl|ForeshadowEvent|TensionMeterAdjust>","args":{}}],"dialogue":{"speaker":"<NPC name like GuardCaptain>","emote":"<urgent|wary|calm>","lines":["<short line>"]},"quest_patch":{"questId":"<string id>","addObjectives":[{"id":"<string>","desc":"<short>"}]}} - If a section is not needed, use [] or {}. Do NOT invent keys (e.g., {"empty":true}). No ellipses or "..." lines. POLICY: - When weather cues are present (e.g., “clouds gathering”) or the player approaches an ACTIVE objective, include exactly ONE tool_call: Prefer WeatherControl("overcast") for light clouds; otherwise ONE of ForeshadowEvent or TensionMeterAdjust(+1). - Only use zero tool_calls if truly nothing is warranted; explain why in "reason". FEW-SHOT: INPUT: Player leaves CitySquare heading west; time=late afternoon; clouds gathering lightly; objective=guard_ruins (active). OUTPUT: BEGIN_JSON {"intent":"warn","reason":"Approaching active ruins as weather worsens.","tool_calls":[{"name":"WeatherControl","args":{"preset":"overcast"}}],"dialogue":{"speaker":"Villager","emote":"wary","lines":["Storm’s building by the ruins. Watch yourself."]},"quest_patch":{}} END_JSON)";
     
    // static const char* kSystemJSON = R"(You are a game director planner. OUTPUT RULES: - STRICT JSON only; no empty {}, no prose or reasoning,You must NEVER show reasoning or explanations, Keys EXACTLY: {"intent":"<offer_quest|warn|give_clue|continue|escalate|deescalate>","reason":"<short>","tool_calls":[{"name":"<QuestPatch|SpawnEncounter|GiveItem|WeatherControl|ForeshadowEvent>","args":{}}],"dialogue":{"speaker":"<NPC name like GuardCaptain>","emote":"<urgent|wary|calm>","lines":["<short line>"]},"quest_patch":{"questId":"<string id>","addObjectives":[{"id":"<string>","desc":"<short>"}]}}. Do NOT invent keys. You should have at least ONE or MANY tool_calls, No ellipses or "..." )";
   
+   // FString kSystemJSON = FString::Printf(LR"(You are a game director planner. OUTPUT RULES: STRICT JSON OUTPUT ONLY. Reply with exactly one JSON object, no prose, no explanations. Begin with '{' and end with '}'. Fill all fields with short strings. Schema: {"intent":"string","reason":"string","tool_calls":[{"name":"string","args":{}}],"dialogue":{"speaker":"string","emote":"urgent|wary|calm","lines":["string"]},"quest_patch":{"questId":"string","addObjectives":[{"id":"string","desc":"string"}]}}. Example (structure only, values will differ): {"intent":"%s","reason":"short","tool_calls":[{"name":"WeatherControl","args":{}}],"dialogue":{"speaker":"GuardCaptain","emote":"urgent","lines":["Keep it tight."]},"quest_patch":{"questId":"q1","addObjectives":[{"id":"o1","desc":"Secure the square."}]}})", *Intent);
+   //// 1) Chat messages (system + user)
+   //
+   // 
+   // 
+   // llama_chat_message msgs[2] = {
+   //     { "system", TCHAR_TO_UTF8(*kSystemJSON) },
+   //     { "user",   TCHAR_TO_UTF8(*Prompt) }
+   // };
 
-    static const char* kSystemJSON = R"(You are a game director planner. OUTPUT RULES: - STRICT JSON only; no empty {}, no prose or reasoning,You must NEVER show reasoning or explanations, Keys EXACTLY: {"intent":"<spawn_event>","reason":"<short>","tool_calls":[{"name":"<WeatherControl>","args":{}}],"dialogue":{"speaker":"<NPC name>","emote":"<urgent|wary|calm>","lines":["<short line>"]},"quest_patch":{"questId":"<string id>","addObjectives":[{"id":"<string>","desc":"<short>"}]}}. POLICY: do not leave any values empty. You should have at least ONE or MANY tool_calls, No ellipses or "..." -Use JSON stricly in response. No empty JSON. )";
 
 
-   // 1) Chat messages (system + user)
-   
-    
-    
+    static const char* kSystemJSON = R"(You are a game director planner. OUTPUT RULES: - STRICT JSON only; no empty {}, no prose or reasoning,You must NEVER show reasoning or explanations, Keys EXACTLY: {"intent":"<intent_value>","reason":"<short>","tool_calls":[{"name":"<WeatherControl>","args":{}}],"dialogue":{"speaker":"<NPC name>","emote":"<urgent|wary|calm>","lines":["<short line>"]},"quest_patch":{"questId":"<string id>","addObjectives":[{"id":"<string>","desc":"<short>"}]}}. POLICY: do not leave any values empty. You should have at least ONE or MANY tool_calls, No ellipses or "..." -Use JSON stricly in response. No empty JSON. )";
+
+    FString json = kSystemJSON;
+    FString Result = json.Replace(TEXT("intent_value"), *Intent);
+
+    FString Clean = Result.Replace(TEXT("\r\n"), TEXT("\n")).TrimStartAndEnd();
+    FTCHARToUTF8 Converter(*Clean);
+
+
+    // 1) Chat messages (system + user)
+
+
+
     llama_chat_message msgs[2] = {
-        { "system", kSystemJSON },
+        { "system", Converter.Get() },
         { "user",   TCHAR_TO_UTF8(*Prompt) }
     };
-
     // 2) Apply chat template (size)
-    UE_LOG(LogTemp, Error, TEXT("2) Apply chat template (size)"));
+    UE_LOG(LogGameAI, Display, TEXT("2) Apply chat template (size)"));
     int32_t templ_bytes_needed = llama_chat_apply_template(nullptr, msgs, 2, /*add_assistant*/ true, nullptr, 0);
     if (templ_bytes_needed <= 0) {
         UE_LOG(LogTemp, Error, TEXT("apply_template(size) failed (%d)"), templ_bytes_needed);
@@ -662,7 +681,7 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
     }
 
     // 3) Render template
-    UE_LOG(LogTemp, Error, TEXT("3) Render template"));
+    UE_LOG(LogGameAI, Display, TEXT("3) Render template"));
     std::string templ((size_t)templ_bytes_needed, '\0');
     int32_t templ_written = llama_chat_apply_template(nullptr, msgs, 2, /*add_assistant*/ true, templ.data(), templ_bytes_needed);
     if (templ_written <= 0 || templ_written > templ_bytes_needed) {
@@ -671,23 +690,23 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
     }
 
     // 4) Tokenize (size + write)
-    UE_LOG(LogTemp, Error, TEXT("4) Tokenize"));
+    UE_LOG(LogGameAI, Display, TEXT("4) Tokenize"));
     int32_t tok_needed = llama_tokenize(Vocab, templ.data(), templ_written, nullptr, 0, /*add_special*/ true, /*parse_special*/ true);
     if (tok_needed < 0) tok_needed = -tok_needed;
     if (tok_needed <= 0) {
-        UE_LOG(LogTemp, Error, TEXT("tokenize(size) failed (%d)"), tok_needed);
+        UE_LOG(LogGameAI, Display, TEXT("tokenize(size) failed (%d)"), tok_needed);
         return "{}";
     }
 
     std::vector<llama_token> tokens((size_t)tok_needed);
     int32_t tok_count = llama_tokenize(Vocab, templ.data(), templ_written, tokens.data(), (int32_t)tokens.size(), /*add_special*/ true, /*parse_special*/ true);
     if (tok_count < 0) {
-        UE_LOG(LogTemp, Error, TEXT("tokenize(write) failed (%d)"), tok_count);
+        UE_LOG(LogGameAI, Display, TEXT("tokenize(write) failed (%d)"), tok_count);
         return "{}";
     }
 
     // 5) Decode prompt (logits only on last token)
-    UE_LOG(LogTemp, Error, TEXT("5) Decode prompt"));
+    UE_LOG(LogGameAI, Display, TEXT("5) Decode prompt"));
     llama_batch prompt_batch = llama_batch_init(tok_count, /*embd*/ 0, /*n_seq_max*/ 1);
     prompt_batch.n_tokens = tok_count;
     for (int i = 0; i < tok_count; ++i) {
@@ -713,7 +732,7 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
     }
 
     // 6) Manual sampling setup
-    UE_LOG(LogTemp, Error, TEXT("6) Manual sampling setup"));
+    UE_LOG(LogGameAI, Display, TEXT("6) Manual sampling setup"));
     const int n_vocab = llama_vocab_n_tokens(Vocab);
     std::vector<float> work_logits((size_t)n_vocab);
     std::vector<int>   idx((size_t)n_vocab);
@@ -783,7 +802,7 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
 
 
     // 7) Generate loop
-    UE_LOG(LogTemp, Error, TEXT("7) Generate loop"));
+    UE_LOG(LogGameAI, Display, TEXT("7) Generate loop"));
     std::vector<llama_token> out_tokens;
     out_tokens.reserve(max_new);
 
@@ -799,7 +818,11 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
         if (escp) { escp = false; continue; } if (ch == '\\') { escp = true; continue; }
         if (ch == '"') { in_q = !in_q; continue; } 
         if (in_q) continue; 
-        if (ch == '{') { ++depth; seen_open = true; }
+        if (ch == '{') 
+        { 
+            ++depth; seen_open = true;
+
+        }
         else if (ch == '}') {
             if (depth > 0) --depth; 
             if (seen_open && depth == 0) { // log before returning 
@@ -807,6 +830,7 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
                 return true; } } } 
     return false; };
 
+    int LastLoggedLen = 0;
     for (int i = 0; i < max_new; ++i) {
         // Use last logits
         const float* logits = llama_get_logits_ith(Ctx, -1);
@@ -829,12 +853,22 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
             char piece[256];
             int pn = llama_token_to_piece(Vocab, (llama_token)id, piece, sizeof(piece), 0, /*special*/ false);
             if (pn > 0) stream.append(piece, piece + pn);
+            //UE_LOG(LogGameAI, Display, TEXT("%s"), UTF8_TO_TCHAR(piece));
             FString LastPiece(piece);
         }
 
 
 
         out_tokens.push_back((llama_token)id);
+
+        // --- log every 100 chars ---
+        if ((int)stream.size() - LastLoggedLen >= 100) {
+            FString Partial = UTF8_TO_TCHAR(stream.c_str());
+            UE_LOG(LogGameAI, Display, TEXT("[stream %d chars]: %s"), (int)stream.size(), *Partial);
+            LastLoggedLen = (int)stream.size();
+        }
+
+
         if (json_done(stream)) break;
 
         // Feed back
@@ -849,7 +883,7 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
     }
 
     // 8) Prefer stream (already text)
-    UE_LOG(LogTemp, Error, TEXT("8) Prefer stream "));
+    UE_LOG(LogGameAI, Display, TEXT("8) Prefer stream "));
     std::string out_str = stream;
     if (out_str.empty() && !out_tokens.empty()) {
         out_str.assign(out_tokens.size() * 8, '\0');

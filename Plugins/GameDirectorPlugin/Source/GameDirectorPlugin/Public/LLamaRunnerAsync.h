@@ -33,10 +33,10 @@ public:
     void Shutdown();
 
     // Synchronous generation (IMPLEMENTATION LIVES IN .CPP)
-    FString GenerateJSON(const FString& Prompt, int max_new, int top_k, float top_p, float temp);
+    FString GenerateJSON(const FString& Prompt, int max_new, int top_k, float top_p, float temp,FString Intent);
 
     // Asynchronous enqueue (callback runs on Game Thread)
-    void GenerateJSONAsync(const FString& Prompt, TFunction<void(FString)> OnDone);
+    void GenerateJSONAsync(const FString& Prompt, TFunction<void(FString)> OnDone,FString Intent);
 
     bool IsInitialized() const { return bInitialized; }
     bool IsValidDirectorJSON(const FString& RawText, FString& OutCleanedJSON, FString& OutError) const;
@@ -55,6 +55,7 @@ private:
     {
         FString Prompt;
         TFunction<void(FString)> OnDone; // called on Game Thread
+        FString Intent;
     };
 
     class FWorker : public FRunnable

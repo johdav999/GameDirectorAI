@@ -2,7 +2,7 @@
 
 
 #include "GameDirectorSubsystem.h"
-
+#include "Misc/Paths.h"
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -102,8 +102,12 @@ bool UGameDirectorSubsystem::InitializeRunner()
     if (!RunnerAsync)
     {
         RunnerAsync = MakeUnique<LLamaRunnerAsync>();
+        FString ModelPath = FPaths::ConvertRelativePathToFull(
+            FPaths::ProjectDir() / TEXT("gptoss20b.f16pure.gguf")
+        );
 
-        return RunnerAsync->Initiate(TEXT("C:\\models\\rpg_director\\gptoss20b.f16pure.gguf"), 4096);
+        return RunnerAsync->Initiate(*ModelPath, 4096);
+       // return RunnerAsync->Initiate(TEXT("C:\\models\\rpg_director\\gptoss20b.f16pure.gguf"), 4096);
     }
 
     //if (!Runner)
@@ -114,7 +118,7 @@ bool UGameDirectorSubsystem::InitializeRunner()
     //}
     return false;
 }
-bool UGameDirectorSubsystem::Generate2(FString Prompt)
+bool UGameDirectorSubsystem::Generate2(FString Prompt, FString Intent)
 {
     RunnerAsync->GenerateJSONAsync(Prompt,
         [this](FString Output)
@@ -135,7 +139,7 @@ bool UGameDirectorSubsystem::Generate2(FString Prompt)
                 D.Response = Json;
                 OnDirectorDecision.Broadcast(D);
             }
-        });
+        },Intent);
     return true;
 }
 bool UGameDirectorSubsystem::Generate(FString Prompt)
