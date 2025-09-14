@@ -12,11 +12,14 @@
 #endif
 
 // If you prefer to include "llama.h" here, do it now:
-#include "llama.h" // ok to include privately
+
 
 DECLARE_LOG_CATEGORY_EXTERN(LogGameAI, Log, All);
 
 DEFINE_LOG_CATEGORY(LogGameAI);
+
+
+// Pseudocode – adapt to your init flow
 
 static bool ExtractStrictJSONObject(const FString& In, FString& Out, FString* OutErr = nullptr)
 {
@@ -492,7 +495,7 @@ bool LLamaRunnerAsync::Initiate(const FString& ModelPath, int32 ContextSize)
     }
 
     // --- Context params ---
-    llama_context_params cparams = llama_context_default_params();
+   cparams = llama_context_default_params();
     cparams.n_ctx = FMath::Max(256, ContextSize);
     cparams.n_threads = FPlatformMisc::NumberOfCores();
 
@@ -570,6 +573,12 @@ void LLamaRunnerAsync::GenerateJSONAsync(const FString& Prompt, TFunction<void(F
     Job.Intent = Intent;
     Worker->Enqueue(MoveTemp(Job));
 }
+void  LLamaRunnerAsync::ResetContext() {
+    FScopeLock _(&DecodeMutex);
+    if (Ctx) { llama_free(Ctx); Ctx = nullptr; }
+    // Recreate with the same params/model you used in Initiate()
+    Ctx = llama_new_context_with_model(Model, cparams);
+}
 
 // ---------- Synchronous GenerateJSON (PUT YOUR EXISTING BODY HERE) ----------
 FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int top_k, float top_p, float temp,FString Intent)
@@ -630,7 +639,12 @@ FString LLamaRunnerAsync::GenerateJSON(const FString& Prompt, int max_new, int t
             return EJsonProbe::None;
         };
 
-
+    {
+        FScopeLock Lock(&DecodeMutex);      // same mutex you use for decode
+        ResetContext();
+        // wipe all past tokens
+        // (optional) llama_reset_timings(Ctx);
+    }
 
     if (!Ctx || !Vocab || !Model) {
         UE_LOG(LogGameAI, Display, TEXT("LlamaRunner not initialized"));

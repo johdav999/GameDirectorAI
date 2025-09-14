@@ -16,7 +16,7 @@
 #include <cstring>
 #include <cfloat>
 #include <cmath>
-
+#include "llama.h"  
 // Forward-declare llama types (avoid including llama.h in public headers if you want)
 struct llama_model;
 struct llama_context;
@@ -38,8 +38,12 @@ public:
     // Asynchronous enqueue (callback runs on Game Thread)
     void GenerateJSONAsync(const FString& Prompt, TFunction<void(FString)> OnDone,FString Intent);
 
+    void ResetContext();
+
     bool IsInitialized() const { return bInitialized; }
     bool IsValidDirectorJSON(const FString& RawText, FString& OutCleanedJSON, FString& OutError) const;
+
+    llama_context_params cparams;
 private:
     // ---- llama state ----
     bool                 bInitialized = false;
